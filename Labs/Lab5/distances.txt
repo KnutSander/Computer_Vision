@@ -1,0 +1,36 @@
+rtual camera positions
+x: 75
+y: 300
+z: 800
+
+B, baseline: 150mm
+
+Vertex 5 of candide (tip of nose):
+x: 0
+y: 289
+z: 280
+
+Z, distance to object (candide): 800-280 = 520mm
+
+candide-r.png
+x: 251
+y: 251
+transformed to conform with 3D system
+x: 251-(639/2) = -68.5
+y: (479/2)-251 = -11.5
+
+candide-l.png
+x: 389
+y: 251
+transformed to conform with 3D system
+x: 389-(639/2) = 69.5
+y: (479/2)-251 = -11.5
+
+
+
+Image sizes
+width: 639
+height: 479
+
+Distance using focal length from calibrate.py
+(484.6×150)÷(69+68) = 530.5839

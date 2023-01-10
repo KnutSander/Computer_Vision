@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""A bare-bones program to help you identify broken biscuits, to be used in
+conjunction with the images of CE316/CE866 experiment 4.  You should run this
+program with one or more images on the command line, and it processes each of
+them in turn.  The processing is as follows:
+
+  1. the image is read in as grey-scale
+  2. it is thresholded using a fixed value
+  3. the resulting binary image is tidied up using morphological operations
+  4. contours are found around each foreground object
+  5. each contour is processed
+  6. some text is written on the image
+
+You have two jobs to do:
+  + Improve the thresholding stage so it generates identifies individual
+    biscuits more reliably.
+
+  + Determine whether a biscuit is circular, rectangular or broken and
+    write that into the image.
+"""
+
+import sys, numpy, cv2, math, os
+
+# Set up the threshold.
+threshold = 100
+
+# The size of the mask use for open and close.
+mask_size = 9
+
+# The font we'll use to write on the image.
+font = cv2.FONT_HERSHEY_SIMPLEX
+
+# Ensure we have some images to process.
+if len (sys.argv) < 2:
+    print ("Usage: %s <biscuit-image>..." % sys.argv[0], file=sys.stderr)
+    exit (1)
+
+# Iterate over the image names given on the command line.
+for fn in sys.argv[1:]:
+
+# Run the command on every file in the folder
+# for fn in os.listdir():
+    # if ".jpg" not in fn:
+        # continue
+    # Read in the image as monochrome and binarize it by thresholding.
+    print (fn + ":")
+    im = cv2.imread (fn, cv2.IMREAD_GRAYSCALE)
+
+    # 2. IMPROVING THE THRESHOLDING
+    # Adaptive Method
+    # blur = cv2.GaussianBlur(im, (5, 5), 5)
+    # bim = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    
+    # Otsu method
+    blur = cv2.GaussianBlur(im, (5, 5), 0)
+    ret, bim = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Old method
+    # ret, bim = cv2.threshold (im, threshold, 255, cv2.THRESH_BINARY)
+
+    # Tidy up the binary image by deleting small regions and filling in gaps.
+    kernel = numpy.ones ((9, 9), numpy.uint8)
+    bim = cv2.morphologyEx (bim, cv2.MORPH_OPEN, kernel)
+    bim = cv2.morphologyEx (bim, cv2.MORPH_CLOSE, kernel)
+
+    # Find contours and print them out.
+    contours, _ = cv2.findContours (bim, cv2.RETR_EXTERNAL,
+                                    cv2.CHAIN_APPROX_SIMPLE)
+    shape = ""
+    for (i, c) in enumerate (contours):
+        print ("   length of contour %d: %d" % (i, len(c)))
+
+        # Gets and draws a rectangle onto the picture based on the contour points
+        # x,y,w,h = cv2.boundingRect(c)
+        # cv2.rectangle(im,(x,y),(x+w,y+h),(0,255,0),2)
+
+        # Gets a rotated box that surrounds the contour 
+        rect = cv2.minAreaRect(c)
+        box = cv2.boxPoints(rect)
+        box = numpy.int0(box)
+
+        # Get the area of the contour and the box
+        contArea = cv2.contourArea(c)
+        boxArea = cv2.contourArea(box)
+
+        # Calculate difference between the contour and the box
+        dif = abs(contArea - boxArea)
+
+        # If the difference is less than 1000, it should be a square biscuit
+        if dif < 1000:
+            shape = "rectangle"
+        else:
+            # If it isn't a square, check the area against a circle
+            (x, y), radius = cv2.minEnclosingCircle(c)
+            circleArea = math.pi * (radius ** 2)
+
+            # Calculate difference between the contour and the circle
+            dif = abs(contArea - circleArea)
+
+            # If the difference is less than 5000, it should be a circular biscuit
+            if dif < 5000:
+                shape = "circle"
+                
+    # Look on the web for how to obtain descriptions of contours; the site
+    #   https://docs.opencv.org/master/dd/d49/tutorial_py_contour_features.html
+    # is one such place.  Calculate features that will categorize a biscuit's
+    # contour as "circular", "rectangular" or "broken" and store that in
+    # the variable "outcome".
+    if len(contours) > 1:
+        outcome = "broken"
+    elif shape == "rectangle":
+        outcome = shape
+    elif shape == "circle":
+        outcome = shape
+    else:
+        outcome = "broken"
+
+    # Write the outcome on the image.  The third argument is the (y,x) location
+    # of where to write it.
+    cv2.putText (im, outcome, (10, 45), font, 1, 0, 2, cv2.LINE_AA)
+
+    # Draw the contours on the image and display the result.
+    cv2.drawContours (im, contours, -1, 0, 2)
+    cv2.imshow (fn, im)
+    cv2.waitKey (0)
+cv2.destroyAllWindows ()

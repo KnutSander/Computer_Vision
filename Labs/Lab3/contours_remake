@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"Remake of contours, just for self reference and commenting"
+import sys, cv2, numpy
+
+# Set-up
+# Thresholding method. Comment out the ones that you don't want to do
+#thresholding = "adaptive"
+thresholding = "otsu"
+#thresholding = "vanilla"
+
+# Contouring method. Comment out the one you don't want to use
+#contouring = "tree"
+contouring = "vanilla"
+
+# Handle input from command line
+if len(sys.argv) < 3:
+    print("Usage: ", sys.argv[0], " <image> <threshold>", file=sys.stderr)
+    sys.exit(1)
+im = cv2.imread(sys.argv[1])
+t = int(sys.argv[2])
+
+# Convert to greyscale
+# See greyscaled picture for refernce
+grey = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+
+# Reduce noise by using GaussianBlur, basically convolution using a blur mask
+# See blured image for reference
+# First argument is image, second argument is the kernel size (should be positive and odd),
+# next is sigmaX (standard deviation). sigmaY is equal to x if not specified
+
+blur = cv2.GaussianBlur(grey, (5,5), 0)
+
+# Threshold the image
+if thresholding == "adaptive":
+    # Adaptive Thresholding
+    # The algorithm determines the threshold for a pixel based on a small region around it.
+    # First argument is an image, should be greyscale. Second argument is the maximum assigned to pixels exceeding the threshold.
+    # Third is the adaptive method, meaning how the threshold is calculated. Fourth is threshold  type. 
+    # Fifth is block size, the size of the neighbourhood area used to calulated threshold value. Sixth is a constant subtracted from the mean or weighted sum of the neighbourhood pixels.
+    binary = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                   cv2.THRESH_BINARY, 11, 2)
+elif thresholding == "otsu":
+    # Otsu Thresholding / Otsu Binarization
+    # Computes the optimal threshold value from the image histogram.
+    # Works very similarly to simple thresholding, but cv2.THRESH_OTSU is passed as a second value. The first output is the optimal threshold, the second is the new image.
+    t, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    print("Otsu threshold is", t)
+else:
+    # Simple Thresholding or "Vanilla"
+    # For every pixel, the same threshold is applied. Pixels smaller then the value is set to 0, all other are set to the max. 
+    # The first argument is an image, should be greyscale. Second argument is threshold value, taken from the command line in this instance. 
+    # Third is maximum assigned to pixels exceeding the threshold. Fourt argumement is the type of thresholding.
+    t, binary = cv2.threshold(blur, t, 255, cv2.THRESH_BINARY)
+
+# Remove small features in the binary image using a morphological close
+# Kernel is the mask used in the erosion
+kernel = numpy.ones((9,9), numpy.uint8)
+
+# Erode shrinks the edges on objects in the given image, while a dialate would increase them
+# In this case we want to erode to remove smaller white areas that will be counted as dices and darker areas inside them that would be counted as dots
+# First argument is the image, second is the kernel used for the shrink, third is the number of iterations the operation is called
+binary = cv2.erode(binary, kernel, iterations=1)
+
+# Find contours
+if contouring == "tree":
+    # Find internal and external contours
+    # Contours are a curve joining all the continuous points along the boundary, having the same colour or intensity
+    # First agument is an image, should be greyscale. Second is the contour retrieval mode.
+    # Third is the contour approximation method.
+    # First returned value is is a list of numpy arrays, each holding the points for a single contour in the image.
+    # The second is a numpy array that contains hierarchy information about the contours.
+    contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Count the number of dots on the dice faces. We do this by iterating through hierarchy[0],
+    # first to find the indices of the dice contours, then a second time to find dot contours
+    # list of dice and dot contours
+    dice = []
+    dots = []
+
+    # Find dice contours, drawing the contours as we process them
+    for(i, c) in enumerate(hierarchy[0]):
+        if c[3] == -1:
+           dice.append(i)
+           # Draws the contours on an image
+           # First argument is the image to draw on. Second is the list of contours.
+           # Third is the index of the contour (to draw all, pass -1)
+           # Fourth is colour. Fifth is thickness.
+           cv2.drawContours(im, contours, i, (0, 0, 255), 5)
+
+    # Find the dot contours, drawing them as we process them
+    for(i, c) in enumerate(hierarchy[0]):
+        if c[3] in dice:
+            dots.append(i)
+            cv2.drawContours(im, contours, i, (0, 255, 0), 5)
+
+    # Report the total number of dots found
+    print("Total die roll:", len(dots))
+
+else:
+    # Find external contours only
+    contours, junk = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Draw contours over original image
+    cv2.drawContours(im, contours, -1, (0, 0, 255), 5)
+    
+    # Print table of the contours and their sizes
+    print("Found %d objects." % len(contours))
+    for(i, c) in enumerate(contours):
+        print("\tSize of contour %d: %d" % (i, len(c)))
+    
+cv2.namedWindow(sys.argv[0], cv2.WINDOW_NORMAL)
+ny, nx, nc = im.shape
+cv2.resizeWindow(sys.argv[0], nx//3, ny//3)
+cv2.imshow(sys.argv[0], im)
+cv2.waitKey(0)
+status = cv2.imwrite('08-dice-otsu-thresh-external-contours.png', im)
+print("Wrote to: ", status)

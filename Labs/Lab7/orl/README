@@ -1,0 +1,27 @@
+# The ORL face database
+
+This directory contains a set of faces taken between April 1992 and April 1994
+at the Olivetti Research Laboratory (ORL) in Cambridge, UK.
+
+There are 10 different images of 40 distinct subjects. For some of the
+subjects, the images were taken at different times, varying lighting slightly,
+facial expressions (open/closed eyes, smiling/non-smiling) and facial details
+(glasses/no-glasses).  All the images are taken against a dark homogeneous
+background and the subjects are in up-right, frontal position (with tolerance
+for some side movement).  The size of each image is 92x112, 8-bit grey levels.
+
+When using these images, please give credit to Olivetti Research Laboratory.
+A convenient reference is the face recognition work which uses some of these
+images:
+
+ F. Samaria and A. Harter 
+  "Parameterisation of a stochastic model for human face identification"
+  2nd IEEE Workshop on Applications of Computer Vision
+  December 1994, Sarasota (Florida).
+
+The database was prepared by Ferdinando Samaria <fs@cam-orl.co.uk>.
+
+ORL became the AT&T Research Laboratory and the database may still be download
+from
+
+http://cam-orl.co.uk/facedatabase.html

@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""summarize -- output some useful statistics of an image and plot its
+histogram"""
+#-------------------------------------------------------------------------------
+# Boilerplate.
+#-------------------------------------------------------------------------------
+from __future__ import division
+import cv2, sys, numpy
+
+# Configuration.
+# CHANGE: Reduced from 256 to 64
+MAXGREY = 64
+
+#-------------------------------------------------------------------------------
+# Routines.
+#-------------------------------------------------------------------------------
+def statistics (im, indent="  "):
+    "Output statistical values that describe an image."
+    # Calculate the statistics.
+    min = im.min ()
+    max = im.max ()
+    ave = im.mean ()
+    sd  = im.std ()
+    
+    # Form and return the message.
+    text = ""
+    text += "%sMinimum: %.2f\n" % (indent, min)
+    text += "%sMaximum: %.2f\n" % (indent, max)
+    text += "%sMean:    %.2f\n" % (indent, ave)
+    text += "%sS.D.:    %.2f\n" % (indent, sd)
+    return text
+
+def histogram (im, fn):
+    "Determine the histogram of an image -- simple version."
+    global MAXGREY
+
+    # We shall fill the array hist with the histogram.
+    hist = numpy.zeros (MAXGREY)
+
+    # Get the image sizes.
+    sizes = im.shape
+    if len (sizes) == 2:
+        # it's monochrome
+        ny = sizes (0)
+        nx = sizes (1)
+        nc = 1
+    else:
+        # it has several channels
+        ny, nx, nc = sizes
+    
+    # Work through the image, accumulating the histogram.
+    for y in range (0, ny):
+        for x in range (0, nx):
+            for c in range (0, nc):
+                v = int (im[y,x,c])
+                hist[v] += 1
+
+    # Output the histogram values to a file.
+    # CHANGE: only output values between the min and the max grey levels
+    # Unsure if it's the inteded solution
+    with open (fn, "w") as f:
+        for i in range (im.min(), im.max()+1):
+            print (i, hist[i], file=f)
+
+def singleColourHistogram(im, fn, ch):
+    "Determines the histogram of the given channel number of the given image"
+    
+    # Create empty array
+    hist = numpy.zeros(256)
+
+    # Get image values
+    ny, nx, nc = im.shape
+
+    # Run through the values of the given channel
+    for y in range (0, ny):
+        for x in range (0, nx):
+            v = int (im[y,x,ch])
+            hist[v] += 1
+
+    # Write the values to a file
+    with open(fn, "w") as f:
+        for i in range(0, 256):
+            print(i, hist[i], file=f)
+    
+
+#-------------------------------------------------------------------------------
+# Main program.
+#-------------------------------------------------------------------------------
+# We want to be invoked with some arguments on the command line.
+"""
+if len (sys.argv) < 2:
+    print ("Usage:", sys.argv[0], "<image>...", file=sys.stderr)
+    sys.exit (1)
+
+# Process each file on the command line in turn.
+for fn in sys.argv[1:]:
+    im = cv2.imread (fn)
+
+    # Output its statistics.
+    print (fn + ":")
+    print (statistics (im))
+
+    # Calculate and output the histogram data.
+    histogram (im, fn + ".dat")
+"""
+
+if len (sys.argv) < 2:
+    print("Usage:", sys.argv[0], "<image> <int=channel_number>", file=sys.stderr)
+
+im = cv2.imread(sys.argv[1])
+channel = int(sys.argv[2])
+
+print(sys.argv[1])
+print(statistics(im))
+
+filename = ""
+if channel == 0:
+    filename = sys.argv[1] + ".blue"
+if channel == 1:
+    filename = sys.argv[1] + ".green"
+if channel == 2:
+    filename = sys.argv[1] + ".red"
+
+
+singleColourHistogram(im, filename + ".dat", channel)
+
+#-------------------------------------------------------------------------------
+# End of summarize.
+#-------------------------------------------------------------------------------

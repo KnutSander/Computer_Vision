@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+
+"""
+" mapreader.py
+"
+" The aim of this program is to segment a red pointer from a map of a region
+" of London to establish its' bearing and the location of its' tip.
+"
+" This will then be used to create a viewable reconstruction of what a person
+" would see from that location and looking in the given direction.
+"
+" The program extracts the map from the original image, then segments the
+" pointer and finds the tip, and lastly calulates the bearing of the triangle.
+" A description of how each of these three steps are done are provided at the
+" begining of each method, and further explained by comments inside the methods.
+"
+" According to the test harness. the largest x-error is 0.01, the largest 
+" y-error is 0.02 and the largest direction-error is 3.70.
+"""
+
+#-------------------------------------------------------------------------------
+# Imports and Global Variables
+#-------------------------------------------------------------------------------
+
+import sys, cv2, numpy, math
+
+DEBUGGING = True
+
+#-------------------------------------------------------------------------------
+# Routines
+#-------------------------------------------------------------------------------
+
+
+def draw_points(pts, im):
+    "Helper method that draws the given points on the given image"
+    for pt in pts:
+        cv2.circle(im, tuple(pt), 2, (0,255,255), -1)
+
+    cv2.imshow("Corners", im)
+    cv2.waitKey(0)
+
+
+    
+def extract_map(im):
+    """
+    " EXTRACTING THE MAP
+    "
+    " This is the method that extracts the map from the image and returns a 
+    " cropped version of the image containing only the map.
+    " It does this by first segmenting the map from the background, using
+    " thresholding and contoruing to find the map. 
+    " Then it rotates the image to make the map straight and finds the corners 
+    " of the map. 
+    " Finally it crops the image to fit the map, and stretches the map to fill 
+    " the new image.
+    "
+    """
+
+    # Convert the picture to greyscale and blur it to prepare for thresholding
+    grey = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(grey, (5, 5), 0)
+
+    # Threshold the image to segment the image from the bakground
+    # Using the otsu thresholding method as it returns the map in white and
+    # the background in black most reliably from testing
+    _, bim = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Dilate to close gaps in the white map
+    # Erode to remove white pixels outside of the map
+    # From testing, using dilate and erode rather than morphological opening
+    # and closing gave the best results
+    # The size of the kernel has also been configured to the size that gave
+    # the best results after testing
+    kernel = numpy.ones ((5, 5), numpy.uint8)
+    bim = cv2.dilate(bim, kernel, iterations = 3)
+    bim = cv2.erode(bim, kernel, iterations = 3)
+
+    # If debugging, show result of thresholding, dilating and eroding
+    if DEBUGGING:
+        cv2.imshow("thresh", bim)
+        cv2.waitKey(0)
+
+    # Extract the contours of the image, only external contours are extratced
+    # The first and only contour in the image is the map border, so assign
+    # it to a seperate variable
+    contours, _ = cv2.findContours(bim, cv2.RETR_EXTERNAL, +
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    map_border = contours[0]
+
+    # If debugging, display the image with the contour drawn on it
+    if DEBUGGING:
+        cv2.drawContours(im, [map_border], 0, (0,255,0), 3)
+        cv2.imshow("contour", im)
+        cv2.waitKey(0)
+
+    # Get rotated bounding rectangle and its angle relative to the image that
+    # will be used to rotate the image to make the map horizontal
+    rect = cv2.minAreaRect(map_border)
+    r_angle = rect[2]
+
+    # If debugging, display the image with the boudning rectangle drawn
+    # on to it
+    if DEBUGGING:
+        box = cv2.boxPoints(rect)
+        box = numpy.int0(box)
+        cv2.drawContours(im, [box], 0, (255,0,0), 3)
+        cv2.imshow("Min Area Rect", im)
+        cv2.waitKey(0)
+        
+    # The following 4 lines of code has been adapted from
+    # https://www.pyimagesearch.com/2021/01/20/opencv-rotate-image/
+
+    # Get the height and width of the image using numpy array slicing
+    # Then calculate the center of the image by dividing the width and the
+    # height by 2
+    h, w = im.shape[:2]
+    center_x, center_y = w // 2, h // 2
+
+    # Get a rotation matrix based on the angle of the bounding rectangle
+    mat = cv2.getRotationMatrix2D((center_x, center_y), r_angle, 1.0)
+
+    # Rotate the images based on the matrix
+    rot = cv2.warpAffine(bim, mat, (w, h))
+    im = cv2.warpAffine(im, mat, (w, h))
+
+    # Get the contour again, now from the rotated image
+    contours, _ = cv2.findContours(rot, cv2.RETR_EXTERNAL, +
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    map_border = contours[0]
+
+    # Get the bounding rectangle of the map border contour
+    # Assign it's x and y (top-left corner), width and height
+    x, y, w, h = cv2.boundingRect(map_border)
+
+    # Get the four corners of the contour using get_corners
+    top_l, top_r, bottom_r, bottom_l = get_corners(map_border)
+
+    # Create the source of the future transformation
+    # Tells the transform which four points to drag from
+    src = numpy.float32([top_l, top_r, bottom_r, bottom_l])
+
+    # If debugging, draw the four corners of the contour
+    if DEBUGGING:
+          draw_points(src, im)
+
+    # Create the destination of the future transform
+    # Tells the transforma which four points to drag to
+    dest = numpy.float32([[x,y], [x+w,y], [x+w,y+h], [x,y+h]])
+
+    # Cut the picture based on the bounding rectangle
+    # From testing cutting the image based on the bounding rectangle provided
+    # more accurate numbers than expanding the map to fit the original image
+    roi = im[y:y+h, x:x+w]
+
+    # If debugging, show the result of the cutting
+    if DEBUGGING:
+        cv2.imshow("Cut picture", roi)
+        cv2.waitKey(0)
+
+    # Create the matrix used to rezise the map using the source
+    # and the destination
+    mat = cv2.getPerspectiveTransform(src, dest)
+    
+    # Warp the image using the matrix
+    # Results in an image entirely filled by the map
+    result = cv2.warpPerspective(roi, mat, (w, h))
+
+    # If debugging, show the resulting image after warping
+    if DEBUGGING:
+        cv2.imshow("Segmented map", result)
+        cv2.waitKey(0)
+
+    # Return the segmented map
+    return result
+
+
+
+def get_corners(cont):
+    """
+    " get_corners - Given a roughly square contour, finds its' four corners
+    """
+    
+    # This function has adapted from the code at
+    # https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
+    
+    # List of coordinates that will hold the four corners
+    # corners[0] is top-left, corners[1] is top-right
+    # corners[2] is bottom-right, corners[3] is bottom-left
+    corners = numpy.zeros((4, 2), dtype = "float32")
+
+    # Get the sum and difference of all the points in the contour
+    cont_sum = cont.sum(axis = 2)
+    cont_diff = numpy.diff(cont, axis = 2)
+
+    # Top-left will have the smallest sum
+    corners[0] = cont[numpy.argmin(cont_sum)]
+
+    # Bottom-right will have the largest sum
+    corners[2] = cont[numpy.argmax(cont_sum)]
+
+    # Top-right has the smallest difference
+    corners[1] = cont[numpy.argmin(cont_diff)]
+
+    # Bottom-left has the biggest difference
+    corners[3] = cont[numpy.argmax(cont_diff)]
+
+    return corners
+    
+
+
+def segment_pointer(im):
+    """
+    " segment_pointer
+    "
+    " This method is used to segment the pointer from the image. It returns the
+    " position of the pointer, as well as a list of the coordinates of the two 
+    " other points on the pointer.
+    " It does this by converting the picture to HSV colour scale, and turning 
+    " everything that doesn't match the hue of the pointer black, while the 
+    " pointer itself becomes white.
+    " Using contouring, it finds the minimum enclosing triangle of the pointer 
+    " and saves the pointer by comparing the three corners, choosing the one 
+    " furthest away from the others by comparing the distance between them.
+    """
+    
+    # Convert the image into hsv format
+    hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+    
+    # Create lower and upper bounds that define the HSV values of the pointer
+    # These were found using "xv", an image display and modification program
+    lower = numpy.array([160, 90, 170])
+    upper = numpy.array([190, 170, 240])
+
+    # The method inRange returns an image where every pixel within the given
+    # bounds are made white, while all other pixels are made black
+    ptr = cv2.inRange(hsv, lower, upper)
+
+    # Fill in gaps in the shape of the now white pointer using
+    # a morphological close
+    kernel = numpy.ones ((9, 9), numpy.uint8)
+    ptr = cv2.morphologyEx(ptr, cv2.MORPH_CLOSE, kernel)
+
+    # If debugging, show the result after the using inRange and closing
+    if DEBUGGING:
+        cv2.imshow("Black and white pointer", ptr)
+        cv2.waitKey(0)
+    
+    # Get the contours in the image
+    # The first and  only one being the contour of the pointer
+    contours, _ = cv2.findContours(ptr, cv2.RETR_EXTERNAL, +
+                                   cv2.CHAIN_APPROX_SIMPLE)
+    border = contours[0]
+
+    # if debugging, show the contour
+    if DEBUGGING:
+        cv2.drawContours(im, [border], 0, (0,255,0), 3)
+        cv2.imshow("Pointer contour", im)
+        cv2.waitKey(0)
+    
+    # Get three points that form the tips of the minimum enclosing triangle
+    # Then convert it to a numpy array for the function
+    # Squeeze to remove unnecessary brackets
+    tri = cv2.minEnclosingTriangle(border)
+    pts = numpy.int32(tri[1])
+    pts = numpy.squeeze(pts)
+    
+    # if debugging, show the minimum enclosing triangle
+    if DEBUGGING:
+        cv2.polylines(im, [pts], True, (255,0,0))
+        cv2.imshow("Minimum enclosing triangle", im)
+        cv2.waitKey(0)
+
+    # Get the tip of the triangle and its position in the array
+    tip, pos = find_tip(pts)
+
+    # Remove the tip and get a list containing the other two points
+    other_points = numpy.delete(pts, pos, axis=0)
+
+    # If debugging, show where the location of the tip on the image
+    if DEBUGGING:
+        cv2.circle(im, tuple(tip), 4, (0,0,255), -1)
+        cv2.imshow("Tip", im)
+        cv2.waitKey(0)
+    
+    # Return the three points of the trinagle and location of the tip
+    # of the triangle
+    return other_points, tip
+
+
+
+def find_tip(pts):
+    """
+    " find_tip
+    "
+    " Given an array of points in a 2D coordinate system, finds the point
+    " furthest away from the others.
+    " Then returns the point and it's position in the array.
+    """
+
+    # Initalise max distance and index variables
+    max_dist, index = 0, 0
+
+    # Run through all the points
+    for p1 in pts:
+        # Initalise distance 
+        dist = 0
+        
+        # x and y coordinates of the point
+        p1x, p1y = p1[0], p1[1]
+        
+        # Run through all the points to compare
+        for p2 in pts:
+            # Skip distance calculation of points are the same
+            if numpy.array_equal(p1, p2):
+                continue
+            
+            # x and y coordinates of the point
+            p2x, p2y = p2[0], p2[1]
+            
+            # The following line has been adapted from the answer given at
+            # https://www.goeduhub.com/2071/write-python-program-calculate-distance-between-points-taking
+            # This calculates the distance between the two points
+            dist = dist + ((((p2x - p1x)**2) + ((p2y-p1y)**2))**0.5)
+
+        # If the distance is higher than the max, it is the new max
+        # and the point is the new point thats the furthest away
+        # Also save it's position to remove it from the array of points
+        if dist > max_dist:
+            max_dist = dist
+            tip = p1
+            pos = index
+
+        # Increment the index to keep track of point position
+        index += 1
+
+    # Return the array of the point that is furthest away from the others
+    # and squeeze it to remove unnecessary brackets
+    # Also return the position of the point in the provided array
+    return numpy.squeeze(tip), pos
+
+
+
+def find_bearing(op, tip): 
+    """
+    " find_bearing
+    "
+    " The last step is to find the bearing of the triangle.
+    " It does this by first finding a point between the two points that aren't
+    " the tip of the triangle.
+    " Using this point and the tip, it calculates the directional vector of the
+    " theoretical line between them
+    " The x and y of the directional vector is then used to calulate the arc
+    " tangent in radians, a value ranging from -PI to PI.
+    " This is then converted into degrees and returned after being altered
+    " slightly because of the differnece between the coordinate system of the
+    " image and OpenCV
+    "
+    " To account for the difference between the two coordinate systems, the
+    " amount they differe must be known.
+    " In a normal coordinate system, the x and y increase as the point 
+    " goes further right and up respectivly. 
+    " In OpenCV, the y is flipped to increase as it goes lower down. 
+    " And in the picture, the green arrow indicates which way is up/north,
+    " meaning that bearing 0 or x, travels upwards.
+    " This is a -90 degree difference from OpenCV.
+    "
+    " The positive degree values will be off by 90 degrees. To account for this
+    " the method adds 90 to all positive degree values before returning them.
+    " The negative values require a bit more work. If the coordinate systems 
+    " were the same, the way to handle them would be to subtract them from 360.
+    " But to account for the 90 degree difference, it must subtract the negative
+    " angle froom 450 (which is of course 360+90).
+    """
+    
+    # Find middle point between the two other points
+    # The following line of code has been adapted from the answer at:
+    # https://stackoverflow.com/questions/5047778/how-to-write-a-function-which-calculate-the-midpoint-between-2-points-in-python
+    mid = numpy.int32([(op[0][0]+op[1][0])/2, (op[0][1]+op[1][1])/2])
+
+    # Get the directional vector between the two points by subtracting them
+    dir_vect = tip - mid
+
+    # Extract the x and y values of the directional vector
+    # Then get the arc tangent in radians, used to calculate the bearing
+    # And convert the arc tangent from radians into degrees
+    x, y = dir_vect
+    arc_tan = math.atan2(y, x)
+    angle = math.degrees(arc_tan)
+    
+    # If the coordinate systems of the pictures were the same the negative
+    # numbers would be subtracted from 360, and the positive would not need
+    # to be altered.
+    # But since they differ by 90 degrees, it needs to add 90 to the positive
+    # angles and subtract the negative ones from 450 (360+90)
+    if angle < 0:
+        return 450 + angle
+    else:
+        return angle + 90
+
+
+#-------------------------------------------------------------------------------
+# Main Program
+#-------------------------------------------------------------------------------
+
+# Ensure we were invoked with a single argument
+if len (sys.argv) != 2:
+    print ("Usage: %s <image-file>" % sys.argv[0], file=sys.stderr)
+    exit (1)
+
+print ("The filename to work on is %s." % sys.argv[1])
+
+# Import the picture file
+im = cv2.imread(sys.argv[1])
+
+# Extract the map from the picture
+im = extract_map(im)
+
+# Return the corner points of the triangle as well as the tip
+op, tip = segment_pointer(im)
+
+# Get image width and height to calculate position of the tip point
+h, w, _ = im.shape
+
+# Calculate the xpos and the ypos using the location of the tip and the width
+# and height of the image
+# The value given by the ypos calculation needs to be subtracted from 1 because
+# OpenCV increases the y going down, while the pictire increases the y going up
+xpos = tip[0]/w
+ypos = 1 - tip[1]/h
+
+# Get the bearing of the pointer
+hdg = find_bearing(op, tip)
+
+# Output the position and bearing in the form required by the test harness.
+print ("POSITION %.3f %.3f" % (xpos, ypos))
+print ("BEARING %.1f" % hdg)
+
+#-------------------------------------------------------------------------------
+# End of mapreader.py
+#-------------------------------------------------------------------------------
+
