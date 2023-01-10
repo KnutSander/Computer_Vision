@@ -1,2 +1,2 @@
 # Computer_Vision
-Assignments and labs from CE316 Computer Vision Retrieval at the University of Essex
+Assignments, labs and lectures from CE316 Computer Vision Retrieval at the University of Essex
